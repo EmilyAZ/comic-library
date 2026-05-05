@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { ComicVineIssue } from '@/lib/comicvine';
+import BarcodeScanner from './components/BarcodeScanner';
 
 type AddStatus = 'idle' | 'saving' | 'added' | 'duplicate' | 'error';
 
@@ -13,6 +14,8 @@ export default function Home() {
 
   // Track per-comic add status: { 12345: 'added', 67890: 'saving', ... }
   const [addStatus, setAddStatus] = useState<Record<number, AddStatus>>({});
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [scanLookupStatus, setScanLookupStatus] = useState<string | null>(null);
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -74,6 +77,31 @@ export default function Home() {
       setAddStatus((prev) => ({ ...prev, [comic.id]: 'error' }));
     }
   }
+  async function handleBarcodeDetected(code: string) {
+    setScannerOpen(false);
+    setScanLookupStatus(`Looking up barcode ${code}...`);
+
+    try {
+      const res = await fetch(`/api/barcode?upc=${encodeURIComponent(code)}`);
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Lookup failed');
+      }
+
+      if (!data.found) {
+        setScanLookupStatus(`No comic found for barcode ${code}. Try searching by name.`);
+        return;
+      }
+
+      // Show the result by setting it as the only search result
+      setResults([data.comic]);
+      setQuery(`Barcode: ${code}`);
+      setScanLookupStatus(null);
+    } catch (err) {
+      setScanLookupStatus(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+  }
 
   function getButtonProps(status: AddStatus) {
     switch (status) {
@@ -101,7 +129,7 @@ export default function Home() {
           <a href="/library" className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded transition">My Library →</a>
         </div>
 
-        <form onSubmit={handleSearch} className="mb-8 flex gap-2">
+        <form onSubmit={handleSearch} className="mb-2 flex gap-2">
           <input
             type="text"
             value={query}
@@ -116,7 +144,19 @@ export default function Home() {
           >
             {loading ? 'Searching...' : 'Search'}
           </button>
+          <button
+            type="button"
+            onClick={() => setScannerOpen(true)}
+            className="px-6 py-3 bg-purple-600 hover:bg-purple-700 rounded font-medium transition"
+            title="Scan barcode"
+          >
+            📷 Scan
+          </button>
         </form>
+
+        {scanLookupStatus && (
+          <p className="text-sm text-gray-400 mb-6">{scanLookupStatus}</p>
+        )}
 
         {error && (
           <div className="bg-red-900 p-4 rounded mb-4">
@@ -171,7 +211,14 @@ export default function Home() {
             No results yet. Try searching!
           </p>
         )}
+        {scannerOpen && (
+          <BarcodeScanner
+            onDetected={handleBarcodeDetected}
+            onClose={() => setScannerOpen(false)}
+          />
+        )}
       </div>
     </main>
   );
+
 }
